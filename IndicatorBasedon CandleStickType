@@ -1,0 +1,150 @@
+//@version=5
+indicator("🕯️ Candle Stick Type", overlay=true, max_labels_count=500)
+
+// === Settings ===
+showLabels = input.bool(true, "Show Pattern Labels")
+patternSize = input.int(10, "Wick/Body Size Filter", minval=1)
+enableRSIFilter = input.bool(true, "Enable RSI Threshold")
+rsiBullThreshold = input.int(40, "RSI Bull Threshold")
+rsiBearThreshold = input.int(60, "RSI Bear Threshold")
+enableVolumeFilter = input.bool(false, "Enable Volume Spike Filter")
+enableDivergenceFilter = input.bool(false, "Enable RSI Divergence Filter")
+pivotLookback = input.int(5, "Divergence Pivot Strength", minval=1)
+divLookback = input.int(20, "Divergence Lookback Range", minval=5)
+showPanel = input.bool(true, "Show Information Panel")
+signalHistoryBars = input.int(20, "Show Signals From Last N Bars", minval=1)
+
+// === Colors ===
+bgColor = color.new(color.gray, 90)
+bullColor = color.new(color.green, 70)
+bearColor = color.new(color.red, 70)
+textColor = color.white
+recentBullColor = color.new(color.green, 50)
+recentBearColor = color.new(color.red, 50)
+
+// === RSI & Volume ===
+rsi = ta.rsi(close, 14)
+vol = volume
+volAvg = ta.sma(vol, 20)
+rsiOK_Bull = not enableRSIFilter or rsi < rsiBullThreshold
+rsiOK_Bear = not enableRSIFilter or rsi > rsiBearThreshold
+volumeOK = not enableVolumeFilter or vol > volAvg
+
+// === Candle Structure ===
+body = math.abs(close - open)
+upperWick = high - math.max(close, open)
+lowerWick = math.min(close, open) - low
+bullish = close > open
+bearish = open > close
+smallBody = body <= (high - low) * 0.3
+
+// === Base Patterns ===
+bullEngulfBase = bearish[1] and bullish and close > open[1] and open < close[1]
+bearEngulfBase = bullish[1] and bearish and close < open[1] and open > close[1]
+morningStarBase = bearish[2] and smallBody[1] and bullish and close > (open[2] + close[2]) / 2
+eveningStarBase = bullish[2] and smallBody[1] and bearish and close < (open[2] + close[2]) / 2
+shootingStarBase = smallBody and upperWick > body * patternSize and lowerWick < body
+hammerBase = smallBody and lowerWick > body * patternSize and upperWick < body
+
+// === RSI Divergence Detection ===
+bullDiv = false
+bearDiv = false
+for i = 1 to divLookback
+    ph = ta.pivothigh(high, pivotLookback, pivotLookback)[i]
+    pl = ta.pivotlow(low, pivotLookback, pivotLookback)[i]
+    ph_rsi = ta.pivothigh(rsi, pivotLookback, pivotLookback)[i]
+    pl_rsi = ta.pivotlow(rsi, pivotLookback, pivotLookback)[i]
+    bullDiv := bullDiv or (not na(pl) and not na(pl_rsi) and low < pl and rsi > pl_rsi)
+    bearDiv := bearDiv or (not na(ph) and not na(ph_rsi) and high > ph and rsi < ph_rsi)
+
+divOK_Bull = not enableDivergenceFilter or bullDiv
+divOK_Bear = not enableDivergenceFilter or bearDiv
+
+// === Final Confirmed Patterns ===
+bullEngulf = bullEngulfBase and rsiOK_Bull and divOK_Bull and volumeOK
+bearEngulf = bearEngulfBase and rsiOK_Bear and divOK_Bear and volumeOK
+morningStar = morningStarBase and rsiOK_Bull and divOK_Bull and volumeOK
+eveningStar = eveningStarBase and rsiOK_Bear and divOK_Bear and volumeOK
+shootingStar = shootingStarBase and rsiOK_Bear and divOK_Bear and volumeOK
+hammer = hammerBase and rsiOK_Bull and divOK_Bull and volumeOK
+
+// === Buy/Sell Signals ===
+buySignal = bullEngulf or morningStar or hammer
+sellSignal = bearEngulf or eveningStar or shootingStar
+
+// === Track Recent Signals ===
+var int lastBuyBarsAgo = na
+var int lastSellBarsAgo = na
+lastBuyBarsAgo := buySignal ? 0 : nz(lastBuyBarsAgo) + 1
+lastSellBarsAgo := sellSignal ? 0 : nz(lastSellBarsAgo) + 1
+
+// === Plot Patterns ===
+plotshape(showLabels and bullEngulf, title="Bullish Engulfing", location=location.belowbar, color=color.green, style=shape.labelup, text="BullEng", textcolor=color.white)
+plotshape(showLabels and bearEngulf, title="Bearish Engulfing", location=location.abovebar, color=color.red, style=shape.labeldown, text="BearEng", textcolor=color.white)
+plotshape(showLabels and morningStar, title="Morning Star", location=location.belowbar, color=color.teal, style=shape.labelup, text="MStar", textcolor=color.white)
+plotshape(showLabels and eveningStar, title="Evening Star", location=location.abovebar, color=color.orange, style=shape.labeldown, text="EStar", textcolor=color.white)
+plotshape(showLabels and shootingStar, title="Shooting Star", location=location.abovebar, color=color.fuchsia, style=shape.triangledown, text="Shoot★", textcolor=color.white)
+plotshape(showLabels and hammer, title="Hammer", location=location.belowbar, color=color.lime, style=shape.triangleup, text="Hammer", textcolor=color.white)
+
+// === Plot Buy/Sell Signals ===
+plotshape(buySignal, title="Buy Signal", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small)
+plotshape(sellSignal, title="Sell Signal", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
+
+// === Alerts ===
+alertcondition(buySignal, "Buy Signal", "Buy Signal Detected (Price Action Pattern)")
+alertcondition(sellSignal, "Sell Signal", "Sell Signal Detected (Price Action Pattern)")
+
+// === MTF Signals ===
+getSignal(tf) =>
+    request.security(syminfo.tickerid, tf, buySignal ? 1 : sellSignal ? -1 : 0)
+
+buySellLabel(sig) =>
+    sig == 1 ? "🟢 YES" : sig == -1 ? "🔴 YES" : "—"
+
+sig5m = getSignal("5")
+sig15m = getSignal("15")
+sig1h = getSignal("60")
+sig4h = getSignal("240")
+
+// === Panel ===
+var table panel = table.new(position.top_right, 4, 20, bgcolor=bgColor, border_width=1)
+if showPanel and barstate.islast
+    table.clear(panel, start_row=0, start_column=0)
+    row = 0
+    table.cell(panel, 0, row, "SIGNAL", bgcolor=color.new(color.purple, 80), text_color=textColor)
+    table.cell(panel, 1, row, "TYPE", bgcolor=color.new(color.purple, 80), text_color=textColor)
+    table.cell(panel, 2, row, "BARS AGO", bgcolor=color.new(color.purple, 80), text_color=textColor)
+    table.cell(panel, 3, row, "—", bgcolor=color.new(color.purple, 80))
+    row += 1
+    table.cell(panel, 0, row, "BUY", bgcolor=bullColor, text_color=textColor)
+    table.cell(panel, 1, row, buySignal ? "🟢 YES" : "—", bgcolor=bullColor, text_color=textColor)
+    table.cell(panel, 2, row, str.tostring(lastBuyBarsAgo), bgcolor=bullColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 0, row, "SELL", bgcolor=bearColor, text_color=textColor)
+    table.cell(panel, 1, row, sellSignal ? "🔴 YES" : "—", bgcolor=bearColor, text_color=textColor)
+    table.cell(panel, 2, row, str.tostring(lastSellBarsAgo), bgcolor=bearColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 0, row, "RSI", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 1, row, str.tostring(rsi, "#.##"), bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, rsi < 30 ? "Oversold" : rsi > 70 ? "Overbought" : "Neutral", bgcolor=bgColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 0, row, "Volume", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 1, row, str.tostring(vol / volAvg, "#.##x"), bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, volumeOK ? "Spike" : "Normal", bgcolor=bgColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 0, row, "Divergence", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 1, row, bullDiv ? "Bullish" : bearDiv ? "Bearish" : "—", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, enableDivergenceFilter ? "ON" : "OFF", bgcolor=bgColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 0, row, "MTF Status", bgcolor=color.new(color.purple, 80), text_color=textColor)
+    table.cell(panel, 1, row, "5m", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, buySellLabel(sig5m), bgcolor=bgColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 1, row, "15m", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, buySellLabel(sig15m), bgcolor=bgColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 1, row, "1H", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, buySellLabel(sig1h), bgcolor=bgColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 1, row, "4H", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, buySellLabel(sig4h), bgcolor=bgColor, text_color=textColor)
