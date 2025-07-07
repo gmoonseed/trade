@@ -127,6 +127,7 @@ buySellLabel(sig) =>
 
 sig5m = getSignal("5")
 sig15m = getSignal("15")
+sig30m = getSignal("30")
 sig1h = getSignal("60")
 sig4h = getSignal("240")
 
@@ -166,6 +167,9 @@ if showPanel and barstate.islast
     row += 1
     table.cell(panel, 1, row, "15m", bgcolor=bgColor, text_color=textColor)
     table.cell(panel, 2, row, buySellLabel(sig15m), bgcolor=bgColor, text_color=textColor)
+    row += 1
+    table.cell(panel, 1, row, "30m", bgcolor=bgColor, text_color=textColor)
+    table.cell(panel, 2, row, buySellLabel(sig1h), bgcolor=bgColor, text_color=textColor)
     row += 1
     table.cell(panel, 1, row, "1H", bgcolor=bgColor, text_color=textColor)
     table.cell(panel, 2, row, buySellLabel(sig1h), bgcolor=bgColor, text_color=textColor)
