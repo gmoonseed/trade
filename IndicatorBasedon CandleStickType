@@ -3,6 +3,7 @@ indicator("🕯️ Candle Stick Type", overlay=true, max_labels_count=500)
 
 // === Settings ===
 showLabels = input.bool(true, "Show Pattern Labels")
+offsetPoints = input.float(2.0, "Label Offset (in Points)", minval=0.1)
 patternSize = input.int(10, "Wick/Body Size Filter", minval=1)
 enableRSIFilter = input.bool(true, "Enable RSI Threshold")
 rsiBullThreshold = input.int(40, "RSI Bull Threshold")
@@ -21,6 +22,10 @@ bearColor = color.new(color.red, 70)
 textColor = color.white
 recentBullColor = color.new(color.green, 50)
 recentBearColor = color.new(color.red, 50)
+
+// === Offset Adjustment ===
+offsetBelow = offsetPoints * syminfo.mintick
+offsetAbove = offsetPoints * syminfo.mintick
 
 // === RSI & Volume ===
 rsi = ta.rsi(close, 14)
@@ -78,13 +83,32 @@ var int lastSellBarsAgo = na
 lastBuyBarsAgo := buySignal ? 0 : nz(lastBuyBarsAgo) + 1
 lastSellBarsAgo := sellSignal ? 0 : nz(lastSellBarsAgo) + 1
 
-// === Plot Patterns ===
-plotshape(showLabels and bullEngulf, title="Bullish Engulfing", location=location.belowbar, color=color.green, style=shape.labelup, text="BullEng", textcolor=color.white)
-plotshape(showLabels and bearEngulf, title="Bearish Engulfing", location=location.abovebar, color=color.red, style=shape.labeldown, text="BearEng", textcolor=color.white)
-plotshape(showLabels and morningStar, title="Morning Star", location=location.belowbar, color=color.teal, style=shape.labelup, text="MStar", textcolor=color.white)
-plotshape(showLabels and eveningStar, title="Evening Star", location=location.abovebar, color=color.orange, style=shape.labeldown, text="EStar", textcolor=color.white)
-plotshape(showLabels and shootingStar, title="Shooting Star", location=location.abovebar, color=color.fuchsia, style=shape.triangledown, text="Shoot★", textcolor=color.white)
-plotshape(showLabels and hammer, title="Hammer", location=location.belowbar, color=color.lime, style=shape.triangleup, text="Hammer", textcolor=color.white)
+// === Y position for plotshape (with offset)
+yBullEng   = showLabels and bullEngulf     ? low - offsetBelow : na
+yBearEng   = showLabels and bearEngulf     ? high + offsetAbove : na
+yMorning   = showLabels and morningStar    ? low - offsetBelow : na
+yEvening   = showLabels and eveningStar    ? high + offsetAbove : na
+yShootStar = showLabels and shootingStar   ? high + offsetAbove : na
+yHammer    = showLabels and hammer         ? low - offsetBelow : na
+
+// === Plot Patterns with Y offset ===
+if showLabels and bullEngulf
+    label.new(bar_index, low - offsetBelow, text="BullEng", style=label.style_label_up, color=color.green, textcolor=color.white)
+
+if showLabels and bearEngulf
+    label.new(bar_index, high + offsetAbove, text="BearEng", style=label.style_label_down, color=color.red, textcolor=color.white)
+
+if showLabels and morningStar
+    label.new(bar_index, low - offsetBelow, text="MStar", style=label.style_label_up, color=color.teal, textcolor=color.white)
+
+if showLabels and eveningStar
+    label.new(bar_index, high + offsetAbove, text="EStar", style=label.style_label_down, color=color.orange, textcolor=color.white)
+
+if showLabels and shootingStar
+    label.new(bar_index, high + offsetAbove, text="Shoot★", style=label.style_label_down, color=color.fuchsia, textcolor=color.white)
+
+if showLabels and hammer
+    label.new(bar_index, low - offsetBelow, text="Hammer", style=label.style_label_up, color=color.lime, textcolor=color.white)
 
 // === Plot Buy/Sell Signals ===
 plotshape(buySignal, title="Buy Signal", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small)
