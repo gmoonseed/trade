@@ -1,0 +1,161 @@
+//@version=5
+indicator("🕯️GmoonPriceaction ", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// === INPUT ===
+showLabels = input.bool(true, "Show Pattern Labels")
+patternSize = input.int(10, "Wick/Body Size Filter", minval=1)
+enableRSIFilter = input.bool(true, "Enable RSI Threshold")
+rsiBullThreshold = input.int(40, "RSI Bull Threshold")
+rsiBearThreshold = input.int(60, "RSI Bear Threshold")
+enableVolumeFilter = input.bool(false, "Enable Volume Spike Filter")
+enableDivergenceFilter = input.bool(false, "Enable RSI Divergence Filter")
+pivotLookback = input.int(5, "Divergence Pivot Strength", minval=1)
+divLookback = input.int(20, "Divergence Lookback Range", minval=5)
+useEMA = input.bool(true, "Aktifkan Trend Filter (EMA 50)")
+emaPeriod = input.int(50, "EMA Period")
+atrPeriod = input.int(14, "ATR Period")
+showLines = input.bool(true, "Tampilkan Garis SL/TP")
+useBoS = input.bool(true, "Gunakan Validasi BoS / CHoCH")
+highLowLookback = input.int(10, "Lookback HH/LL untuk BoS")
+bosModeClose = input.bool(true, "Gunakan Close (bukan High/Low) untuk BoS")
+useRejection = input.bool(true, "Gunakan Rejection Candle Filter")
+showPanel = input.bool(true, "Show Info Panel")
+riskPoint = input.float(3.0, "Risk (Point)")
+rr1 = input.float(1.2, "TP1 RR Multiplier")
+rr2 = input.float(2.0, "TP2 RR Multiplier")
+rr3 = input.float(4.0, "TP3 RR Multiplier")
+
+// === SIGNAL ===
+getSignalLayer1() =>
+    rsi = ta.rsi(close, 14)
+    vol = volume
+    volAvg = ta.sma(vol, 20)
+    rsiOK_Bull = not enableRSIFilter or rsi < rsiBullThreshold
+    rsiOK_Bear = not enableRSIFilter or rsi > rsiBearThreshold
+    volumeOK = not enableVolumeFilter or vol > volAvg
+
+    body = math.abs(close - open)
+    upperWick = high - math.max(close, open)
+    lowerWick = math.min(close, open) - low
+    bullish = close > open
+    bearish = open > close
+    smallBody = body <= (high - low) * 0.3
+
+    bullEngulf = bearish[1] and bullish and close > open[1] and open < close[1]
+    bearEngulf = bullish[1] and bearish and close < open[1] and open > close[1]
+    morningStar = bearish[2] and smallBody[1] and bullish and close > (open[2] + close[2]) / 2
+    eveningStar = bullish[2] and smallBody[1] and bearish and close < (open[2] + close[2]) / 2
+    shootingStar = smallBody and upperWick > body * patternSize and lowerWick < body
+    hammer = smallBody and lowerWick > body * patternSize and upperWick < body
+
+    rejectionBull = lowerWick > (high - low) * 0.6 and body < (high - low) * 0.3 and bullish
+    rejectionBear = upperWick > (high - low) * 0.6 and body < (high - low) * 0.3 and bearish
+
+    bullDiv = false
+    bearDiv = false
+    for i = 1 to divLookback
+        pl = ta.pivotlow(low, pivotLookback, pivotLookback)[i]
+        ph = ta.pivothigh(high, pivotLookback, pivotLookback)[i]
+        rsi = ta.rsi(close, 14)
+        pl_rsi = ta.pivotlow(rsi, pivotLookback, pivotLookback)[i]
+        ph_rsi = ta.pivothigh(rsi, pivotLookback, pivotLookback)[i]
+        bullDiv := bullDiv or (not na(pl) and not na(pl_rsi) and low < pl and rsi > pl_rsi)
+        bearDiv := bearDiv or (not na(ph) and not na(ph_rsi) and high > ph and rsi < ph_rsi)
+
+    bullOK = (bullEngulf or morningStar or hammer or rejectionBull) and (not enableDivergenceFilter or bullDiv) and rsiOK_Bull and volumeOK
+    bearOK = (bearEngulf or eveningStar or shootingStar or rejectionBear) and (not enableDivergenceFilter or bearDiv) and rsiOK_Bear and volumeOK
+
+    [bullOK, bearOK]
+
+isTrendUp = not useEMA or close > ta.ema(close, emaPeriod)
+isTrendDown = not useEMA or close < ta.ema(close, emaPeriod)
+atr = ta.atr(atrPeriod)
+bodySize = math.abs(close - open)
+
+entry = close
+sl = entry - riskPoint
+tp1 = entry + riskPoint * rr1
+tp2 = entry + riskPoint * rr2
+tp3 = entry + riskPoint * rr3
+
+slSell = entry + riskPoint
+tp1Sell = entry - riskPoint * rr1
+tp2Sell = entry - riskPoint * rr2
+tp3Sell = entry - riskPoint * rr3
+
+hh = ta.highest(bosModeClose ? close : high, highLowLookback)
+ll = ta.lowest(bosModeClose ? close : low, highLowLookback)
+bosBuy = close > hh[1] and bodySize > atr * 0.25
+bosSell = close < ll[1] and bodySize > atr * 0.25
+
+[buy1, sell1] = getSignalLayer1()
+finalBuy = buy1 and isTrendUp and (not useBoS or bosBuy)
+finalSell = sell1 and isTrendDown and (not useBoS or bosSell)
+
+var label lastSignalLabel = na
+var line lastSignalLine = na
+var line trailingSLLine = na
+var label trailingSLLabel = na
+
+var bool inPosition = false
+var float lastEntry = na
+var float trailSL = na
+var int entryBar = na
+
+if finalBuy or finalSell
+    label.delete(lastSignalLabel)
+    line.delete(lastSignalLine)
+    line.delete(trailingSLLine)
+    label.delete(trailingSLLabel)
+
+    inPosition := true
+    entryBar := bar_index
+    lastEntry := entry
+    trailSL := na
+
+    if finalBuy
+        lastSignalLabel := label.new(bar_index, low - atr, "BUY\nENTRY: " + str.tostring(entry) + "\nSL: " + str.tostring(sl) + "\nTP1: " + str.tostring(tp1) + "\nTP2: " + str.tostring(tp2) + "\nTP3: " + str.tostring(tp3), style=label.style_label_up, color=color.green, textcolor=color.white)
+        lastSignalLine := line.new(bar_index, sl, bar_index + 5, sl, extend=extend.right, color=color.red, width=1)
+    else
+        lastSignalLabel := label.new(bar_index, high + atr, "SELL\nENTRY: " + str.tostring(entry) + "\nSL: " + str.tostring(slSell) + "\nTP1: " + str.tostring(tp1Sell) + "\nTP2: " + str.tostring(tp2Sell) + "\nTP3: " + str.tostring(tp3Sell), style=label.style_label_down, color=color.red, textcolor=color.white)
+        lastSignalLine := line.new(bar_index, slSell, bar_index + 5, slSell, extend=extend.right, color=color.red, width=1)
+
+// === TRAILING STOP AFTER TP1 ===
+if inPosition
+    if finalBuy
+        if high >= tp1 and (na(trailSL) or trailSL < entry)
+            trailSL := entry
+            line.delete(trailingSLLine)
+            label.delete(trailingSLLabel)
+            trailingSLLine := line.new(bar_index, trailSL, bar_index + 5, trailSL, extend=extend.right, color=color.orange, width=1)
+            trailingSLLabel := label.new(bar_index + 5, trailSL, "Trailing SL (TP1)", style=label.style_label_right, color=color.orange, textcolor=color.white)
+        if high >= tp2 and trailSL < tp1
+            trailSL := tp1
+            line.set_xy1(trailingSLLine, bar_index, trailSL)
+            line.set_xy2(trailingSLLine, bar_index + 5, trailSL)
+            label.set_xy(trailingSLLabel, bar_index + 5, trailSL)
+            label.set_text(trailingSLLabel, "Trailing SL (TP2)")
+        if high >= tp3
+            inPosition := false
+
+    if finalSell
+        if low <= tp1Sell and (na(trailSL) or trailSL > entry)
+            trailSL := entry
+            line.delete(trailingSLLine)
+            label.delete(trailingSLLabel)
+            trailingSLLine := line.new(bar_index, trailSL, bar_index + 5, trailSL, extend=extend.right, color=color.orange, width=1)
+            trailingSLLabel := label.new(bar_index + 5, trailSL, "Trailing SL (TP1)", style=label.style_label_right, color=color.orange, textcolor=color.white)
+        if low <= tp2Sell and trailSL > tp1Sell
+            trailSL := tp1Sell
+            line.set_xy1(trailingSLLine, bar_index, trailSL)
+            line.set_xy2(trailingSLLine, bar_index + 5, trailSL)
+            label.set_xy(trailingSLLabel, bar_index + 5, trailSL)
+            label.set_text(trailingSLLabel, "Trailing SL (TP2)")
+        if low <= tp3Sell
+            inPosition := false
+
+plotshape(showLabels and finalBuy, location=location.belowbar, style=shape.triangleup, color=color.green, size=size.small)
+plotshape(showLabels and finalSell, location=location.abovebar, style=shape.triangledown, color=color.red, size=size.small)
+
+alertcondition(finalBuy, title="Buy Signal", message="Final BUY Signal Triggered")
+alertcondition(finalSell, title="Sell Signal", message="Final SELL Signal Triggered")
